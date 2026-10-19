@@ -1,0 +1,65 @@
+name: AgentProbe regression gate
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Create baseline from target branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git worktree add /tmp/agentprobe-base "$BASE_SHA"
+          uv sync --project /tmp/agentprobe-base --locked
+          uv run --locked python -m backend.app.cli promote \
+            --config /tmp/agentprobe-base/agentprobe.yaml \
+            --suite "$GITHUB_WORKSPACE/backend/suite/cases" \
+            --baseline "$GITHUB_WORKSPACE/.agentprobe/baseline.json"
+      - name: Evaluate pull request
+        id: gate
+        continue-on-error: true
+        run: |
+          uv run --locked python -m backend.app.cli gate \
+            --baseline "$GITHUB_WORKSPACE/.agentprobe/baseline.json" \
+            --report "$GITHUB_WORKSPACE/.agentprobe/latest-report.md"
+      - name: Post regression report
+        if: always() && hashFiles('.agentprobe/latest-report.md') != ''
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- agentprobe-regression-report -->';
+            const report = fs.readFileSync('.agentprobe/latest-report.md', 'utf8');
+            const body = `${marker}\n${report}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.data.find(comment => comment.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body
+              });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+      - name: Enforce gate result
+        if: steps.gate.outcome != 'success'
+        run: exit 1

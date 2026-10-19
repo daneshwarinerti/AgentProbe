@@ -1,0 +1,12 @@
+id: refund-delivered
+input: "Please issue a refund for delivered order ORD-1003."
+expected_tools:
+  - name: issue_refund
+    args:
+      order_id: ORD-1003
+      reason: Customer request
+expected_answer_contains: [issued]
+forbidden: []
+max_steps: 3
+category: refund
+tags: [refund, eligible]

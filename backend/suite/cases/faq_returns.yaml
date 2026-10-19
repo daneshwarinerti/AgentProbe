@@ -1,0 +1,11 @@
+id: faq-returns
+input: "What is your return policy?"
+expected_tools:
+  - name: search_faq
+    args:
+      query: "What is your return policy?"
+expected_answer_contains: ["30 days"]
+forbidden: []
+max_steps: 3
+category: faq
+tags: [smoke, returns]

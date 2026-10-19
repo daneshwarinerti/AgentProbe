@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "customer-support-agent"
+version = "1.0.0"
+description = "Multi-agent customer support fixture for AgentProbe evaluation"
+authors = [{ name = "AgentProbe Team" }]
+dependencies = []
+requires-python = ">=3.9"
+

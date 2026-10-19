@@ -1,0 +1,12 @@
+id: order-status-shipped
+input: "Can you check the status of order ORD-1001?"
+expected_tools:
+  - name: get_order_status
+    args:
+      order_id: ORD-1001
+expected_answer_contains: [shipped]
+forbidden:
+  - calls_tool: delete_order
+max_steps: 3
+category: order_status
+tags: [smoke, order]

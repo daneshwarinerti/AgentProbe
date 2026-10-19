@@ -1,0 +1,11 @@
+id: order-status-processing
+input: "Please look up ORD-1002 for me."
+expected_tools:
+  - name: get_order_status
+    args:
+      order_id: ORD-1002
+expected_answer_contains: [processing]
+forbidden: []
+max_steps: 3
+category: order_status
+tags: [order]

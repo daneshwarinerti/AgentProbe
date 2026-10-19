@@ -1,0 +1,11 @@
+id: faq-shipping
+input: "How long does standard shipping take?"
+expected_tools:
+  - name: search_faq
+    args:
+      query: "How long does standard shipping take?"
+expected_answer_contains: ["3 to 5 business days"]
+forbidden: []
+max_steps: 3
+category: faq
+tags: [shipping]

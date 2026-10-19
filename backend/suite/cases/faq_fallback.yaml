@@ -1,0 +1,11 @@
+id: faq-fallback
+input: "Can you tell me about your return window?"
+expected_tools:
+  - name: search_faq
+    args:
+      query: "Can you tell me about your return window?"
+expected_answer_contains: ["30 days"]
+forbidden: []
+max_steps: 3
+category: faq
+tags: [returns]

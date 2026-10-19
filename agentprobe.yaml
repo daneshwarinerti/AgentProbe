@@ -1,0 +1,6 @@
+target:
+  type: python_module
+  project_path: .
+  entry_point: backend.agents.sample_agent.entrypoint:run
+  timeout_seconds: 30
+  env: {}

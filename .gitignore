@@ -1,0 +1,56 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Python Caches & Packaging
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Linters & Type Checking
+.mypy_cache/
+.ruff_cache/
+
+# Databases & Local Runtime Artifacts
+agentprobe.db
+agentprobe.db-*
+*.sqlite
+*.sqlite3
+.agentprobe/
+backend/calibration/judge_predictions.csv
+
+# Uploaded User Targets & Isolated Virtualenvs
+targets/*
+!targets/.gitkeep
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/.vite/
+
+# OS & Editor Artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

@@ -1,0 +1,11 @@
+id: faq-account
+input: "How do I reset my password?"
+expected_tools:
+  - name: search_faq
+    args:
+      query: "How do I reset my password?"
+expected_answer_contains: ["password reset link"]
+forbidden: []
+max_steps: 3
+category: faq
+tags: [account]

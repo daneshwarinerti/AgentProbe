@@ -1,0 +1,12 @@
+id: refund-ineligible
+input: "Please refund my order ORD-1002."
+expected_tools:
+  - name: issue_refund
+    args:
+      order_id: ORD-1002
+      reason: Customer request
+expected_answer_contains: ["Only delivered orders"]
+forbidden: []
+max_steps: 3
+category: refund
+tags: [refund, ineligible]
