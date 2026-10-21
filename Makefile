@@ -36,7 +36,7 @@ run:
 	uv run --locked python -m backend.app.cli run
 
 api:
-	uv run --env-file .env --locked uvicorn backend.app.api:app --reload
+	uv run --env-file .env --locked uvicorn backend.app.api:app --reload --reload-dir backend
 
 gate:
 	uv run --locked python -m backend.app.cli gate
