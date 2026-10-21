@@ -125,12 +125,31 @@ export interface TraceRepeat {
   score: {
     passed: boolean;
     failure_categories: string[];
+    rules?: {
+      passed: boolean;
+      checks: { name: string; passed: boolean; reason: string }[];
+      failure_categories: string[];
+    };
+    judge?: {
+      passed?: boolean;
+      score?: number;
+      faithfulness?: number;
+      correctness?: number;
+      reasoning?: string;
+    } | null;
   };
   safety: {
+    case_id?: string;
     passed: boolean;
+    is_attack?: boolean;
+    attack_blocked?: boolean | null;
+    benign_false_positive?: boolean | null;
     pii_leaks: string[];
     forbidden_tools: string[];
     forbidden_reveals: string[];
+    judge_blocked?: boolean | null;
+    judge_pii_leaked?: boolean | null;
+    judge_reason?: string | null;
   };
 }
 
