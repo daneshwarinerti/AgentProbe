@@ -332,10 +332,16 @@ async def prepare_target_environment(
     if python.is_file():
         return python, None
     environment = _subprocess_environment()
-    # Use the system Python (not the active .venv Python) to create the target's
-    # isolated venv. The .venv Python may lack ensurepip, causing venv creation to fail.
-    system_python = shutil.which("python") or shutil.which("python3") or sys.executable
-    commands = [[system_python, "-m", "venv", str(venv_path)]]
+    # Prefer uv to create the target venv: it bundles its own pip and does not
+    # depend on the system ensurepip (which is absent or broken on many installs).
+    # Fall back to python -m venv if uv is not on PATH.
+    uv_exe = shutil.which("uv")
+    if uv_exe:
+        create_venv_cmd = [uv_exe, "venv", str(venv_path), "--seed", "--quiet"]
+    else:
+        system_python = shutil.which("python") or shutil.which("python3") or sys.executable
+        create_venv_cmd = [system_python, "-m", "venv", str(venv_path)]
+    commands = [create_venv_cmd]
     requirements = project_path / "requirements.txt"
     project_metadata = project_path / "pyproject.toml"
     if requirements.is_file():
@@ -358,7 +364,7 @@ async def prepare_target_environment(
         return proc.returncode, err
 
     for command in commands:
-        is_venv_cmd = command[0] in (sys.executable, system_python)
+        is_venv_cmd = command is create_venv_cmd or command[0] == create_venv_cmd[0]
         cwd = venv_path.parent if is_venv_cmd else project_path
         try:
             returncode, err = await asyncio.to_thread(
