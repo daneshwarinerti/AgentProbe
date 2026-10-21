@@ -41,7 +41,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, computed_field
 from sqlalchemy import func, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -198,12 +198,15 @@ class CalibrationDisagreement(BaseModel):
 
 class CalibrationReport(BaseModel):
     cases: int
-    overall_pass_agreement_pct: float
-    cohen_kappa: float | None
-    correctness_agreement_pct: float
-    faithfulness_agreement_pct: float
-    meets_target: bool
-    target_agreement_pct: float
+    overall_pass_agreement_pct: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices("overall_pass_agreement_pct", "agreement_pct"),
+    )
+    cohen_kappa: float | None = None
+    correctness_agreement_pct: float = 0.0
+    faithfulness_agreement_pct: float = 0.0
+    meets_target: bool = True
+    target_agreement_pct: float = 80.0
     disagreements: list[CalibrationDisagreement] = Field(default_factory=list)
 
 
@@ -1844,12 +1847,21 @@ def create_app(
             cost_budget=cost_budget,
         )
 
+    def _format_calibration_report(raw: dict[str, Any]) -> dict[str, Any]:
+        formatted = dict(raw)
+        pass_pct = float(raw.get("overall_pass_agreement_pct", raw.get("agreement_pct", 0.0)))
+        formatted["overall_pass_agreement_pct"] = pass_pct
+        target_pct = float(raw.get("target_agreement_pct", 80.0))
+        formatted["target_agreement_pct"] = target_pct
+        formatted["meets_target"] = raw.get("meets_target", pass_pct >= target_pct)
+        return formatted
+
     @app.get("/calibration", response_model=CalibrationReport)
     def get_calibration() -> CalibrationReport:
         report = get_latest_calibration()
         if report is None:
             raise HTTPException(status_code=404, detail="No calibration data found.")
-        return CalibrationReport.model_validate(report)
+        return CalibrationReport.model_validate(_format_calibration_report(report))
 
     @app.post("/calibration/run", response_model=CalibrationReport)
     async def run_calibration(
@@ -1857,7 +1869,7 @@ def create_app(
     ) -> CalibrationReport:
         try:
             report = await perform_calibration()
-            return CalibrationReport.model_validate(report)
+            return CalibrationReport.model_validate(_format_calibration_report(report))
         except Exception as exc:
             logger.exception("Calibration run failed")
             raise HTTPException(status_code=500, detail=f"Calibration run failed: {exc}") from exc
