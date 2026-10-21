@@ -31,7 +31,17 @@ def normalize_agent_result(value: Any) -> AgentResult:
         raise TypeError("Agent entry point must return a string or a result mapping.")
     answer = value.get("final_answer", value.get("output"))
     if not isinstance(answer, str):
-        raise ValueError("Agent result mapping must contain string 'final_answer' or 'output'.")
+        for candidate_key in ("customer_reply", "response", "result", "message", "comms_update", "text", "content"):
+            candidate = value.get(candidate_key)
+            if isinstance(candidate, str):
+                answer = candidate
+                break
+    if not isinstance(answer, str):
+        import json
+        try:
+            answer = json.dumps({k: v for k, v in value.items() if k != "steps"})
+        except Exception:
+            answer = str(value)
     steps = value.get("steps", [])
     if not isinstance(steps, list):
         raise ValueError("Agent result 'steps' must be a list.")

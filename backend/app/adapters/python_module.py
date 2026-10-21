@@ -79,10 +79,14 @@ else:
     result = function(case_input)
 if inspect.isawaitable(result):
     result = asyncio.run(result)
-if isinstance(result, str):
+if hasattr(result, "model_dump") and callable(result.model_dump):
+    result = result.model_dump()
+elif hasattr(result, "dict") and callable(result.dict):
+    result = result.dict()
+elif isinstance(result, str):
     result = {"final_answer": result}
-if not isinstance(result, dict):
-    raise TypeError("Agent function must return a string or a result mapping.")
+elif not isinstance(result, dict):
+    result = {"final_answer": str(result)}
 output_mapping = payload["output_mapping"]
 if output_mapping:
     mapped = {}
