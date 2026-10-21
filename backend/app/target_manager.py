@@ -1,4 +1,4 @@
-"""Local project upload, inspection, and isolated Python execution helpers."""
+﻿"""Local project upload, inspection, and isolated Python execution helpers."""
 
 from __future__ import annotations
 
@@ -332,7 +332,10 @@ async def prepare_target_environment(
     if python.is_file():
         return python, None
     environment = _subprocess_environment()
-    commands = [[sys.executable, "-m", "venv", str(venv_path)]]
+    # Use the system Python (not the active .venv Python) to create the target's
+    # isolated venv. The .venv Python may lack ensurepip, causing venv creation to fail.
+    system_python = shutil.which("python") or shutil.which("python3") or sys.executable
+    commands = [[system_python, "-m", "venv", str(venv_path)]]
     requirements = project_path / "requirements.txt"
     project_metadata = project_path / "pyproject.toml"
     if requirements.is_file():
@@ -355,7 +358,8 @@ async def prepare_target_environment(
         return proc.returncode, err
 
     for command in commands:
-        cwd = project_path if command[0] != sys.executable else venv_path.parent
+        is_venv_cmd = command[0] in (sys.executable, system_python)
+        cwd = venv_path.parent if is_venv_cmd else project_path
         try:
             returncode, err = await asyncio.to_thread(
                 _run_cmd_sync, command, cwd, environment, timeout_seconds
