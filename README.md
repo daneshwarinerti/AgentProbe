@@ -236,8 +236,10 @@ the approved baseline are available through the corresponding REST routes. Error
 ### Uploading a local Python target
 
 `POST /targets` accepts a `.zip` file, a `package.module:function` entry point, and optional
-JSON form fields `env_json`, `input_mapping_json`, and `output_mapping_json`. By default, the
-target's returned string or result mapping is passed through to AgentProbe. For example:
+JSON form fields `env_json`, `input_mapping_json`, and `output_mapping_json`, plus optional
+newline-separated `extra_requirements` for PyPI package names and version specifiers. Declared
+dependencies in the archive's `requirements.txt` or `pyproject.toml` are installed too. By default,
+the target's returned string or result mapping is passed through to AgentProbe. For example:
 
 ```powershell
 curl.exe -X POST http://127.0.0.1:8000/targets `
@@ -258,6 +260,17 @@ heuristics, and accepts edited names in `{"agent_names":["support"]}`. `POST
 /targets/{id}/dry-run` runs one `{"input":"sample"}` request; `GET /targets` lists local targets
 and `DELETE /targets/{id}` removes their extracted files and virtual environments. These write
 operations use the existing local API key.
+Notebook `%pip install` and `!pip install` cells are also used to provision listed PyPI packages;
+notebook result/print cells are omitted from the generated importable module so they do not make
+extra model calls before the selected entry point runs.
+
+The ZIP evaluation workflow runs only approved suite cases linked to that uploaded target. It
+does not apply bundled benchmark cases to arbitrary projects. Create and approve target-specific
+cases in **Test Suites** before starting an evaluation; provider authentication or missing project
+dependencies are reported as execution errors rather than replaced with sample answers.
+If a ZIP has no dependency manifest, provide the missing PyPI package names in the upload form's
+**Additional Python Dependencies** field. For hosted-model projects, also supply the provider API
+key in **Environment Variables**; dependencies alone do not provide provider credentials.
 
 Archives are limited to 100 MB and 10,000 files; traversal paths, absolute paths, symlinks, and
 secret-like files (including `.env` and `*.pem`) are rejected or skipped. Environment values are

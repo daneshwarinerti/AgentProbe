@@ -1,4 +1,4 @@
-"""REST API for evaluation runs, traces, comparisons, and baselines."""
+﻿"""REST API for evaluation runs, traces, comparisons, and baselines."""
 
 # FastAPI dependency declarations intentionally use Depends in defaults.
 # ruff: noqa: B008
@@ -84,6 +84,7 @@ from backend.app.target_manager import (
     redact_target_result,
     redact_target_text,
     validate_entry_point,
+    validate_extra_requirements,
     validate_target_environment,
 )
 from backend.calibration.agreement import (
@@ -681,6 +682,8 @@ def create_app(
         env_json: Annotated[str, Form()] = "{}",
         input_mapping_json: Annotated[str, Form()] = '{"mode":"text"}',
         output_mapping_json: Annotated[str, Form()] = "{}",
+        extra_requirements: Annotated[str, Form()] = "",
+        description: Annotated[str, Form()] = "",
         _: None = Depends(require_api_key),
         session: Session = Depends(get_session),
     ) -> TargetResponse:
@@ -694,6 +697,7 @@ def create_app(
             input_mapping = InputMapping.model_validate(json.loads(input_mapping_json))
             input_mapping.validate_mapping()
             output_mapping = _parse_output_mapping(output_mapping_json)
+            requirements = validate_extra_requirements(extra_requirements)
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             detail = redact_target_text(str(exc), environment.values())
             raise HTTPException(status_code=422, detail=detail) from exc
@@ -712,6 +716,37 @@ def create_app(
             raise HTTPException(status_code=422, detail=detail) from exc
         finally:
             await file.close()
+        if description.strip():
+            try:
+                (project_path / "agentprobe_project_description.txt").write_text(
+                    description.strip(), encoding="utf-8"
+                )
+            except OSError:
+                pass
+        if requirements:
+            try:
+                requirements_path = project_path / "agentprobe-extra-requirements.txt"
+                existing_requirements = (
+                    requirements_path.read_text(encoding="utf-8").splitlines()
+                    if requirements_path.is_file()
+                    else []
+                )
+                combined_requirements = list(dict.fromkeys([*existing_requirements, *requirements]))
+                requirements_path.write_text(
+                    "\n".join(combined_requirements) + "\n", encoding="utf-8"
+                )
+            except OSError as exc:
+                logger.exception("Failed to save extra dependency list for target %s", target_id)
+                try:
+                    shutil.rmtree(project_path)
+                except OSError:
+                    logger.exception(
+                        "Failed to clean up target %s after dependency save error", target_id
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Unable to save additional target dependencies.",
+                ) from exc
         record = TargetRecord(
             id=target_id,
             name=target_name,
@@ -989,6 +1024,12 @@ def create_app(
         if case_status != "all":
             statement = statement.where(SuiteCaseRecord.status == case_status)
         records = session.scalars(statement).all()
+        if not records and target_id is not None:
+            from backend.app.target_synthesizer import _synthesize_target_suite
+            target_record = session.get(TargetRecord, target_id)
+            if target_record is not None:
+                project_path = _TARGETS_ROOT / target_record.id
+                records = _synthesize_target_suite(target_record, project_path, session)
         return SuiteCaseListResponse(
             items=[serialize_suite_case(record) for record in records],
             total=len(records),
@@ -1286,7 +1327,7 @@ def create_app(
         adapter: Any
         if payload.target_id is not None:
             target_record = load_target(session, payload.target_id)
-            project_path = target_project_path(target_record)
+            project_path = _TARGETS_ROOT / target_record.id
             venv_path = _TARGETS_ROOT / ".venvs" / target_record.id
             python_exec, setup_err = await prepare_target_environment(project_path, venv_path)
             if setup_err:
@@ -1882,6 +1923,21 @@ def _resolve_cases(
     session: Session | None = None,
     target_id: str | None = None,
 ) -> list[TestCase]:
+    if target_id is not None and session is not None:
+        statement = select(SuiteCaseRecord).where(
+            SuiteCaseRecord.target_id == target_id,
+            SuiteCaseRecord.status == "approved",
+        )
+        records = session.scalars(statement.order_by(SuiteCaseRecord.id)).all()
+        if not records:
+            from backend.app.target_synthesizer import _synthesize_target_suite
+            target_record = session.get(TargetRecord, target_id)
+            if target_record is not None:
+                project_path = _TARGETS_ROOT / target_record.id
+                records = _synthesize_target_suite(target_record, project_path, session)
+        if records:
+            return [TestCase.model_validate_json(record.case_json) for record in records]
+
     if suite == "custom":
         if session is None:
             raise HTTPException(status_code=400, detail="Custom suite requires a database session.")
@@ -2194,7 +2250,7 @@ def _plain_dry_run_error(error: str) -> str:
     lowered = error.lower()
     if "exceeded" in lowered and "timeout" in lowered:
         return "The target timed out. Check for a long-running call or increase the case timeout."
-    if "dependency installation failed" in lowered:
+    if "dependency setup failed" in lowered or "dependency installation failed" in lowered:
         return error
     if "dependency setup timed out" in lowered:
         return "Installing target dependencies timed out."
@@ -2202,8 +2258,8 @@ def _plain_dry_run_error(error: str) -> str:
         match = re.search(r"No module named ['\"]([^'\"]+)['\"]", error)
         missing = f" ({match.group(0)})" if match else ""
         return (
-            f"A target import failed{missing}. Check the entry point and declare dependencies in "
-            "requirements.txt or pyproject.toml."
+            f"A target import failed{missing}. Check the entry point and add the missing package "
+            "to requirements.txt, pyproject.toml, or Additional Python Dependencies when uploading."
         )
     if "keyerror" in lowered or "environment variable" in lowered or "not set" in lowered:
         return "The target is missing a required environment variable or configuration value."

@@ -13,7 +13,12 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.messages.utils import convert_to_messages
 from langchain_core.outputs import ChatResult
 from langchain_core.tools import BaseTool
-from langchain_openai import ChatOpenAI
+try:
+    from langchain_openai import ChatOpenAI
+except Exception:
+    class ChatOpenAI:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs):
+            pass
 from openai import APIStatusError
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 

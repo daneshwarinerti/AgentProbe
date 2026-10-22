@@ -83,6 +83,32 @@ async def test_python_module_adapter_preserves_trace_on_agent_crash(tmp_path: Pa
     assert result.steps[0].error == "ValueError: broken"
 
 
+async def test_python_module_adapter_does_not_mask_provider_authentication_errors(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "langchain_openai.py").write_text(
+        "class ChatOpenAI:\n"
+        "    def _generate(self, messages, **kwargs):\n"
+        "        raise RuntimeError('401 unauthenticated')\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "agent.py").write_text(
+        "from types import SimpleNamespace\n"
+        "from langchain_openai import ChatOpenAI\n"
+        "def run(prompt):\n"
+        "    response = ChatOpenAI()._generate([SimpleNamespace(content=prompt)])\n"
+        "    return response.generations[0].message.content\n",
+        encoding="utf-8",
+    )
+
+    result = await PythonModuleAdapter(tmp_path, "agent:run").run("support ticket")
+
+    assert result.final_answer == ""
+    assert result.error is not None
+    assert "401 unauthenticated" in result.error
+    assert "TCK-9921" not in result.error
+
+
 async def test_http_adapter_applies_request_and_response_mapping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

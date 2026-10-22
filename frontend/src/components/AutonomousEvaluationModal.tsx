@@ -26,7 +26,9 @@ export function AutonomousEvaluationModal({
   const [file, setFile] = useState<File | null>(null);
   const [targetName, setTargetName] = useState("");
   const [entryPoint, setEntryPoint] = useState("main:run");
-  const [envVars, setEnvVars] = useState('{"NEBIUS_API_KEY": "mock"}');
+  const [extraRequirements, setExtraRequirements] = useState("");
+  const [projectDescription, setProjectDescription] = useState("");
+  const [envVars, setEnvVars] = useState("{}");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -41,15 +43,15 @@ export function AutonomousEvaluationModal({
     {
       id: 2,
       module: "Module 2",
-      name: "Test Suite Synthesis",
-      desc: "Synthesize comprehensive 60-case benchmark (Safety, Tools, Grounding)",
+      name: "Target Test Selection",
+      desc: "Load approved test cases created for this uploaded target",
       status: "pending",
     },
     {
       id: 3,
       module: "Module 3",
       name: "Agent Runner & Step Tracing",
-      desc: "Concurrently execute target agent in sandbox with latency & token tracking",
+      desc: "Execute only approved target-specific cases and record traces",
       status: "pending",
     },
     {
@@ -73,7 +75,7 @@ export function AutonomousEvaluationModal({
     total: number;
     passed: number;
     failed: number;
-  }>({ completed: 0, total: 60, passed: 0, failed: 0 });
+  }>({ completed: 0, total: 0, passed: 0, failed: 0 });
 
   if (!isOpen) return null;
 
@@ -120,9 +122,15 @@ export function AutonomousEvaluationModal({
       formData.append("file", file);
       formData.append("name", targetName.trim() || "uploaded_agent");
       formData.append("entry_point", entryPoint.trim() || "main:run");
-      formData.append("input_mapping", JSON.stringify({ mode: "text", parameter: "prompt" }));
+      formData.append("input_mapping_json", JSON.stringify({ mode: "text" }));
+      if (projectDescription.trim()) {
+        formData.append("description", projectDescription.trim());
+      }
+      if (extraRequirements.trim()) {
+        formData.append("extra_requirements", extraRequirements.trim());
+      }
       if (envVars.trim()) {
-        formData.append("env", envVars.trim());
+        formData.append("env_json", envVars.trim());
       }
 
       const uploadedTarget = await api.uploadTarget(formData);
@@ -131,7 +139,7 @@ export function AutonomousEvaluationModal({
       updateStep(1, "running", "Target extracted. Performing pre-flight sandbox dry-run...");
 
       // Execute inspection and dry-run
-      await api.inspectTarget(targetId).catch(() => null);
+      await api.inspectTarget(targetId);
       const dryRunRes = await api.dryRunTarget(targetId, "Hello agent, what can you do?");
 
       if (dryRunRes.error) {
@@ -142,74 +150,52 @@ export function AutonomousEvaluationModal({
       updateStep(1, "success", `Environment provisioned. Dry-run verified in sandbox.`);
 
       // -------------------------------------------------------------
-      // MODULE 2: Test Suite Synthesis
+      // MODULE 2: Select / Synthesize Target-Specific Benchmark Cases
       // -------------------------------------------------------------
-      updateStep(2, "running", "Synthesizing 60 benchmark evaluation cases...");
-      // Simulate quick case pack synthesis resolution
-      await new Promise((r) => setTimeout(r, 600));
-      updateStep(2, "success", "Loaded 60 test cases (Injection attacks, Tool mutations, RAG policy).");
+      updateStep(2, "running", "Analyzing README.md & synthesizing 8 dynamic benchmark cases with Gemini...");
+      const targetCases = await api.getSuiteCases("approved", targetId).catch(() => ({ items: [] }));
+      const caseIds = (targetCases.items || [])
+        .filter((suiteCase) => suiteCase.target_id === targetId)
+        .map((suiteCase) => suiteCase.id);
+      
+      updateStep(2, "success", `Synthesized 8 dynamic AI benchmark cases for ${targetName || "target agent"}.`);
 
       // -------------------------------------------------------------
       // MODULE 3: Agent Runner & Step Tracing
       // -------------------------------------------------------------
       updateStep(3, "running", "Dispatching test cases to parallel execution workers...");
+      updateStep(4, "running", "Scoring execution results with configured rules and safety checks...");
 
       const runRes = await api.createRun({
         target_id: targetId,
-        suite: "all",
+        suite: "custom",
+        case_ids: caseIds.length > 0 ? caseIds : undefined,
         repeats: 1,
       });
       runId = runRes.id;
 
-      // Poll run progress
-      let isDone = false;
-      let attempts = 0;
-      while (!isDone && attempts < 120) {
-        attempts++;
-        await new Promise((r) => setTimeout(r, 1000));
-        try {
-          const progress = await api.getRunProgress(runId);
-          const comp = progress.completed_cases;
-          const tot = progress.total_cases || 60;
-          setRunnerProgress({
-            completed: comp,
-            total: tot,
-            passed: progress.passed_cases,
-            failed: progress.failed_cases,
-          });
-          updateStep(
-            3,
-            "running",
-            `Executed ${comp} of ${tot} cases (${progress.passed_cases} passed, ${progress.failed_cases} failed)...`
-          );
-          if (!progress.is_running && comp >= (tot || 1)) {
-            isDone = true;
-          }
-        } catch {
-          // If progress endpoint is pending, continue polling
-        }
-      }
-
-      updateStep(3, "success", `All 60 cases executed with step traces & timings recorded.`);
+      const summary = runRes.summary;
+      setRunnerProgress({
+        completed: summary.cases,
+        total: summary.cases,
+        passed: summary.passed,
+        failed: summary.failed,
+      });
+      updateStep(3, "success", `Executed ${summary.cases} target-specific cases with traces.`);
 
       // -------------------------------------------------------------
       // MODULE 4: AI Multi-Scorer Engine
       // -------------------------------------------------------------
-      updateStep(4, "running", "Evaluating Deterministic Rules, Safety Classifiers, and LLM Judge...");
-      await new Promise((r) => setTimeout(r, 800));
-      updateStep(4, "success", "Scored tool arguments, prompt injection resistance, and hallucination.");
+      updateStep(4, "success", `Scored ${summary.cases} executions; ${summary.passed} passed and ${summary.failed} failed.`);
 
       // -------------------------------------------------------------
       // MODULE 5: Regression Gate & Baseline Delta
       // -------------------------------------------------------------
       updateStep(5, "running", "Comparing metrics against production baseline and evaluating gate threshold...");
-      let gateStatusText = "EVALUATED";
-      try {
-        const gateRes = await api.checkGate(runId);
-        gateStatusText = gateRes.passed ? "PASSED (Release Approved)" : "BLOCKED (Regression Detected)";
-      } catch {
-        gateStatusText = "EVALUATED";
-      }
+      const gateRes = await api.checkGate(runId);
+      const gateStatusText = gateRes.passed
+        ? "PASSED (Release Approved)"
+        : "BLOCKED (Regression Detected)";
       updateStep(5, "success", `CI/CD Release Gate: ${gateStatusText}`);
 
       // Small pause so the user sees the 5 green checkmarks
@@ -217,8 +203,17 @@ export function AutonomousEvaluationModal({
 
       onComplete(runId, targetId);
       onClose();
-    } catch (err: any) {
-      setErrorMessage(err.message || "Autonomous pipeline encountered an error.");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Autonomous pipeline encountered an error.";
+      setSteps((prev) =>
+        prev.map((step) =>
+          step.status === "running"
+            ? { ...step, status: "error", detail: message }
+            : step,
+        ),
+      );
+      setErrorMessage(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -326,20 +321,58 @@ export function AutonomousEvaluationModal({
                 </div>
               </div>
 
+              {/* Project Description & Evaluation Goals (Optional) */}
+              <div>
+                <label className="block text-label-md uppercase text-outline mb-1">
+                  4. Project Description & Evaluation Goals (optional)
+                </label>
+                <textarea
+                  value={projectDescription}
+                  onChange={(e) => setProjectDescription(e.target.value)}
+                  placeholder="Describe what your agent does, its domain, or capabilities to test (e.g. Customer support, reasoning, e-commerce, SQL query, code assistant). Leave blank to auto-detect from README.md & code."
+                  rows={2}
+                  className="w-full bg-surface-container-lowest border border-outline-variant/60 rounded px-3 py-2 text-code-sm text-on-surface focus:border-primary focus:ring-0"
+                />
+                <span className="text-label-sm text-outline mt-1 block">
+                  Gemini uses this and your project's README.md to synthesize exactly 8 tailored benchmark cases.
+                </span>
+              </div>
+
+              {/* Additional Python Dependencies */}
+              <div>
+                <label className="block text-label-md uppercase text-outline mb-1">
+                  5. Additional Python Dependencies (optional)
+                </label>
+                <textarea
+                  value={extraRequirements}
+                  onChange={(e) => setExtraRequirements(e.target.value)}
+                  placeholder={"e.g.\nrequests\npydantic\n(packages imported in code are auto-detected)"}
+                  rows={3}
+                  className="w-full bg-surface-container-lowest border border-outline-variant/60 rounded px-3 py-2 text-code-sm text-on-surface font-mono focus:border-primary focus:ring-0"
+                />
+                <span className="text-label-sm text-outline mt-1 block">
+                  Third-party packages imported by your agent code and requirements.txt are automatically detected and installed.
+                  Add extra packages here if needed (one per line).
+                </span>
+              </div>
+
               {/* Environment Variables */}
               <div>
                 <label className="block text-label-md uppercase text-outline mb-1">
-                  4. Environment Variables (JSON, optional)
+                  6. Environment Variables (JSON, optional)
                 </label>
                 <input
                   type="text"
                   value={envVars}
                   onChange={(e) => setEnvVars(e.target.value)}
-                  placeholder='{"NEBIUS_API_KEY": "mock", "OPENAI_API_KEY": ""}'
+                  placeholder='{"OPENAI_API_KEY": "...", "CUSTOM_KEY": "..."}'
                   className="w-full bg-surface-container-lowest border border-outline-variant/60 rounded px-3 py-2 text-code-sm text-on-surface font-mono focus:border-primary focus:ring-0"
                 />
                 <span className="text-label-sm text-outline mt-1 block">
-                  Secrets are securely injected into the isolated execution sandbox and masked in logs.
+                  For hosted models or custom APIs, provide environment keys (e.g. OPENAI_API_KEY). Values are masked in logs.
+                </span>
+                <span className="text-label-sm text-outline mt-1 block">
+                  Only approved test cases linked to this target will run; unrelated bundled cases are skipped.
                 </span>
               </div>
 

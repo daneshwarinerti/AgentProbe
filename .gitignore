@@ -48,6 +48,7 @@ frontend/coverage/
 frontend/.vite/
 
 # OS & Editor Artifacts
+scratch/
 .DS_Store
 Thumbs.db
 .idea/

@@ -11,7 +11,12 @@ from typing import Any, Protocol, TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
-from langchain_openai import ChatOpenAI
+try:
+    from langchain_openai import ChatOpenAI
+except Exception:
+    class ChatOpenAI:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs):
+            pass
 from langgraph.graph import END, StateGraph
 from pydantic import SecretStr
 

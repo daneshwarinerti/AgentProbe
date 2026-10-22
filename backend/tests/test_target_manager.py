@@ -1,6 +1,8 @@
 """Safety and behavior tests for uploaded local targets."""
 
 import io
+import json
+import os
 import stat
 import zipfile
 from pathlib import Path
@@ -14,7 +16,9 @@ from backend.app.target_manager import (
     dry_run_target,
     extract_project_archive,
     inspect_project,
+    prepare_target_environment,
     redact_target_result,
+    validate_extra_requirements,
     validate_target_environment,
 )
 
@@ -48,6 +52,49 @@ def test_extract_archive_strips_common_root_and_skips_sensitive_files(tmp_path: 
     assert not (project / "credentials-prod.json").exists()
     assert not (project / "cert.pem").exists()
     assert not (project / ".venv").exists()
+
+
+def test_notebook_upload_extracts_pip_packages_without_running_example_cells(
+    tmp_path: Path,
+) -> None:
+    notebook = json.dumps(
+        {
+            "cells": [
+                {
+                    "cell_type": "code",
+                    "source": [
+                        "%pip install llama-index-llms-nebius llama-index-embeddings-nebius"
+                    ],
+                },
+                {"cell_type": "code", "source": ["!pip install -U llama-index"]},
+                {
+                    "cell_type": "code",
+                    "source": [
+                        "def run(query):\n",
+                        "    return query\n",
+                        "response = run('example')\n",
+                        "print(response)\n",
+                    ],
+                },
+            ]
+        }
+    )
+    project = extract_project_archive(
+        _zip_bytes({"simple-rag/agent.ipynb": notebook}),
+        tmp_path / "targets",
+        "00000000-0000-0000-0000-000000000004",
+    )
+
+    generated_module = (project / "agent.py").read_text(encoding="utf-8")
+    dependencies = (project / "agentprobe-extra-requirements.txt").read_text(encoding="utf-8")
+    assert "def run(query):" in generated_module
+    assert "response = run(" not in generated_module
+    assert "print(response)" not in generated_module
+    assert dependencies.splitlines() == [
+        "llama-index-llms-nebius",
+        "llama-index-embeddings-nebius",
+        "llama-index",
+    ]
 
 
 @pytest.mark.parametrize("name", ["../escape.py", "C:/escape.py", "folder\\..\\escape.py"])
@@ -147,6 +194,72 @@ def test_target_environment_allows_project_keys_but_reserves_trace_path() -> Non
     }
     with pytest.raises(ValueError, match="AGENTPROBE_TRACE_FILE"):
         validate_target_environment({"agentprobe_trace_file": "outside.jsonl"})
+
+
+def test_extra_requirements_accept_package_specs_and_reject_pip_directives() -> None:
+    assert validate_extra_requirements(
+        "# optional packages\nllama-index>=0.12\nrequests==2.32.3"
+    ) == ["llama-index>=0.12", "requests==2.32.3"]
+    with pytest.raises(ValueError, match="PyPI package names"):
+        validate_extra_requirements("-r https://example.test/requirements.txt")
+
+
+async def test_prepare_target_environment_installs_extra_requirements(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "agentprobe-extra-requirements.txt").write_text("llama-index\n", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    async def fake_to_thread(
+        _function: object, command: list[str], *_args: object
+    ) -> tuple[int, str]:
+        commands.append(command)
+        return 0, ""
+
+    monkeypatch.setattr("backend.app.target_manager.shutil.which", lambda _command: None)
+    monkeypatch.setattr("backend.app.target_manager.asyncio.to_thread", fake_to_thread)
+
+    python, error = await prepare_target_environment(project, tmp_path / "venvs" / "target")
+
+    assert error is None
+    assert python.name == ("python.exe" if os.name == "nt" else "python")
+    assert any(
+        command[-3:] == ["install", "-r", str(project / "agentprobe-extra-requirements.txt")]
+        for command in commands
+    )
+
+
+async def test_prepare_target_environment_reports_sanitized_dependency_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    requirements = project / "agentprobe-extra-requirements.txt"
+    requirements.write_text("llama-index\n", encoding="utf-8")
+    attempts = 0
+
+    async def fake_to_thread(
+        _function: object, _command: list[str], *_args: object
+    ) -> tuple[int, str]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return 0, ""
+        return 1, "Could not find a version for llama-index. See https://user:secret@example.test"
+
+    monkeypatch.setattr("backend.app.target_manager.shutil.which", lambda _command: None)
+    monkeypatch.setattr("backend.app.target_manager.asyncio.to_thread", fake_to_thread)
+
+    _, error = await prepare_target_environment(project, tmp_path / "venvs" / "target")
+
+    assert error is not None
+    assert "installing agentprobe-extra-requirements.txt" in error
+    assert "Could not find a version for llama-index" in error
+    assert "https://user:secret" not in error
+    assert "example.test" not in error
+    assert not (tmp_path / "venvs" / "target").exists()
 
 
 async def test_uploaded_target_uses_private_venv_mapping_and_sdk_tracing(tmp_path: Path) -> None:

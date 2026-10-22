@@ -415,6 +415,7 @@ def test_target_upload_inspection_dry_run_and_delete_are_local_and_redacted(
         data={
             "entry_point": "agent:run",
             "env_json": '{"API_TOKEN":"hidden-value"}',
+            "extra_requirements": "llama-index>=0.12",
         },
     )
     assert created.status_code == 201
@@ -426,6 +427,9 @@ def test_target_upload_inspection_dry_run_and_delete_are_local_and_redacted(
     project_path = targets_root / target_id
     assert (project_path / "agent.py").is_file()
     assert not (project_path / ".env").exists()
+    assert (project_path / "agentprobe-extra-requirements.txt").read_text(
+        encoding="utf-8"
+    ) == "llama-index>=0.12\n"
 
     with engine.connect() as connection:
         saved_environment: str = connection.execute(
